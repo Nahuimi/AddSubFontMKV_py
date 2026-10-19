@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=84", "wheel>=0.48"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asfmkv"
+version = "0.1.0"
+description = "AddSubFontMKV Python Remake：字幕字体子集化与 MKV 封装工具"
+readme = "README.md"
+# fontTools 4.67 起要求 Python >= 3.11，故最低版本随之提高
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "fonttools>=4.67,<5",
+    # 7.6 起顶层 detect 接口已稳定；7.7.0 尚未同步到部分国内镜像（如阿里云），
+    # 下限取 7.6 可避免这些环境下安装依赖失败。
+    "chardet>=7.6,<8",
+    "colorama>=0.4.6,<0.5",
+]
+
+[project.optional-dependencies]
+# 兼容 pip 用户（pip install -e ".[dev]"）；uv 用户请使用下面的依赖组
+dev = ["pytest>=9.1,<10", "ruff>=0.17"]
+
+[dependency-groups]
+# uv 管理：`uv sync` 默认安装 dev 组；CI 用 `uv sync --frozen`（含 dev 组）
+dev = [
+    "pytest>=9.1,<10",
+    "ruff>=0.17",
+]
+# 仅打包需要，按打包方式分开安装，避免 CI 两套工具都装：
+#   Nuitka：      uv sync --group build-nuitka
+#   PyInstaller： uv sync --group build-pyinstaller
+build-nuitka = [
+    "nuitka>=4.3",
+    "zstandard>=0.25",
+]
+build-pyinstaller = [
+    "pyinstaller>=6.22",
+]
+
+[project.scripts]
+asfmkv = "asfmkv.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["asfmkv*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: 需要系统字体或外部工具的集成测试",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+# 与 requires-python 保持一致：ruff 会按该版本解析语法，
+# 从而在静态检查阶段发现「仅高版本可用」的语法（如 PEP 701 f-string）。
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# 只启用“真实缺陷”级别的规则，避免风格类告警淹没问题。
+select = ["E9", "F63", "F7", "F82"]

@@ -1,0 +1,284 @@
+name: Release Beta Build
+
+# 两个发布入口（release-beta.yml / release-beta-pyinstaller.yml）共用的实现：
+# 打包与发布流程只在这里改一次，避免两个文件各改一遍还改漏。
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "版本号（如 v0.0.1）：用作 Release 标签和 zip 文件名后缀"
+        required: true
+        type: string
+      packager:
+        description: "打包方式：nuitka 或 pyinstaller"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: 打包并发布预发布版
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      PYTHON_VERSION: "3.12"
+      UV_VERSION: "0.13.1"
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 安装 uv 与 Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 解析版本（并校验打包方式）
+        id: meta
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+          PACKAGER: ${{ inputs.packager }}
+        run: |
+          $tag = "$env:VERSION".Trim()
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw "必须输入版本号，例如 v0.0.1" }
+          if ($tag -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+            throw "版本号只能包含字母、数字、点、下划线、连字符：$tag"
+          }
+
+          $packager = "$env:PACKAGER".Trim().ToLowerInvariant()
+          if ($packager -notin @('nuitka', 'pyinstaller')) {
+            throw "packager 只能是 nuitka 或 pyinstaller，收到：$packager"
+          }
+
+          # exe 的 Windows 版本资源必须是 x.x.x.x 四段数字：取版本号里的数字并补 0
+          $parts = @(0, 0, 0, 0)
+          $nums = @([regex]::Matches($tag, '\d+') | ForEach-Object { [Math]::Min(65535, [int]$_.Value) })
+          for ($i = 0; $i -lt [Math]::Min(4, $nums.Count); $i++) { $parts[$i] = $nums[$i] }
+          $wver = ($parts -join '.')
+          $wver4 = ($parts -join ', ')
+
+          # 程序自身版本号（--version 输出）：去掉可能的 v 前缀，如 v0.0.1 -> 0.0.1
+          $appver = $tag -replace '^[vV]', ''
+
+          $asset = if ($packager -eq 'nuitka') { 'ASFMKV-Nuitka' } else { 'ASFMKV-PyInstaller' }
+
+          "tag=$tag"           | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "wver=$wver"         | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "wver4=$wver4"       | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "appver=$appver"     | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "asset=$asset"       | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "packager=$packager" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+          Write-Host "Release 标签=$tag  exe 版本=$wver  程序版本=$appver  资产前缀=$asset（$packager）"
+
+      - name: 安装依赖与打包工具
+        run: uv sync --frozen --group "build-${{ steps.meta.outputs.packager }}"
+
+      - name: 安装外部工具（集成测试用）
+        shell: pwsh
+        run: |
+          # 集成测试会调用 mkvmerge / ffmpeg，runner 默认不带，缺失时相关用例只会 skip
+          choco install mkvtoolnix ffmpeg -y --no-progress
+          $mkvDir = "C:\Program Files\MKVToolNix"
+          if (Test-Path -LiteralPath $mkvDir) {
+            $env:Path = "$mkvDir;$env:Path"
+            $mkvDir | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
+          mkvmerge -V
+          ffmpeg -version | Select-Object -First 1
+
+      - name: 运行测试
+        run: uv run pytest -q
+
+      - name: 注入程序版本号
+        shell: pwsh
+        env:
+          APPVER: ${{ steps.meta.outputs.appver }}
+        run: |
+          # asfmkv/_version.py 不入库：构建时生成，asfmkv/__init__.py 会优先读取它
+          @(
+            '"""构建时由发布工作流生成，请勿提交。"""',
+            '',
+            ('APP_VERSION = "{0}"' -f $env:APPVER)
+          ) | Set-Content -Path asfmkv/_version.py -Encoding utf8
+          Get-Content asfmkv/_version.py
+
+      - name: 生成版本资源（仅 PyInstaller）
+        if: inputs.packager == 'pyinstaller'
+        shell: pwsh
+        env:
+          WVER: ${{ steps.meta.outputs.wver }}
+          WVER4: ${{ steps.meta.outputs.wver4 }}
+        run: |
+          $ver = $env:WVER
+          $ver4 = $env:WVER4
+          @"
+          VSVersionInfo(
+            ffi=FixedFileInfo(
+              filevers=($ver4),
+              prodvers=($ver4),
+              mask=0x3f,
+              flags=0x0,
+              OS=0x40004,
+              fileType=0x1,
+              subtype=0x0,
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo([
+                StringTable(
+                  '080404B0',
+                  [StringStruct('CompanyName', 'ASFMKV'),
+                   StringStruct('FileDescription', 'ASFMKV command line tool'),
+                   StringStruct('FileVersion', '$ver'),
+                   StringStruct('ProductName', 'AddSubFontMKV Python Remake'),
+                   StringStruct('ProductVersion', '$ver'),
+                   StringStruct('LegalCopyright', 'Apache-2.0')])
+              ]),
+              VarFileInfo([VarStruct('Translation', [2052, 1200])])
+            ]
+          )
+          "@ | Set-Content -Encoding utf8 version_info.txt
+
+      - name: Nuitka 打包
+        if: inputs.packager == 'nuitka'
+        shell: pwsh
+        env:
+          WVER: ${{ steps.meta.outputs.wver }}
+        run: |
+          uv run python -m nuitka `
+            --standalone `
+            --onefile `
+            --assume-yes-for-downloads `
+            --enable-plugin=anti-bloat `
+            --include-package=asfmkv `
+            --include-package-data=fontTools `
+            --include-package-data=chardet `
+            --nofollow-import-to=pytest `
+            --nofollow-import-to=tests `
+            --windows-console-mode=force `
+            --company-name="ASFMKV" `
+            --product-name="AddSubFontMKV Python Remake" `
+            --file-description="ASFMKV command line tool" `
+            --copyright="Apache-2.0" `
+            --file-version="$env:WVER" `
+            --product-version="$env:WVER" `
+            --output-dir=dist `
+            --output-filename=ASFMKV.exe `
+            build_entry.py
+          Get-ChildItem dist
+
+      - name: PyInstaller 打包
+        if: inputs.packager == 'pyinstaller'
+        shell: pwsh
+        run: |
+          # 注意：不要使用 --specpath，否则 spec 内的 version_info.txt 等相对路径
+          # 会基于 spec 所在目录解析，导致 FileNotFoundError。
+          $root = (Get-Location).Path
+          uv run python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --console `
+            --name ASFMKV `
+            --distpath (Join-Path $root "dist") `
+            --workpath (Join-Path $root "build") `
+            --collect-all fontTools `
+            --collect-all chardet `
+            --version-file (Join-Path $root "version_info.txt") `
+            (Join-Path $root "build_entry.py")
+          Get-ChildItem dist
+
+      - name: 冒烟测试
+        shell: pwsh
+        env:
+          APPVER: ${{ steps.meta.outputs.appver }}
+        run: |
+          $out = & ./dist/ASFMKV.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "ASFMKV.exe 无法运行" }
+          # 版本号在构建前注入，这里顺便验证注入是否生效（防止发出去的 exe 版本对不上标签）
+          if ("$out" -notlike "*${env:APPVER}*") {
+            throw "exe 版本与发布版本不一致：期望包含 ${env:APPVER}，实际输出：$out"
+          }
+          Write-Host "$out"
+
+      - name: 打包为 zip
+        shell: pwsh
+        env:
+          ASSET: ${{ steps.meta.outputs.asset }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          $asset = "${env:ASSET}-${env:TAG}.zip"
+          Compress-Archive -Path dist/ASFMKV.exe -DestinationPath $asset -Force
+          Get-ChildItem $asset | Select-Object Name, Length
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.meta.outputs.asset }}-${{ steps.meta.outputs.tag }}
+          path: ${{ steps.meta.outputs.asset }}-${{ steps.meta.outputs.tag }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布预发布 Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.meta.outputs.asset }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          $tag = $env:TAG
+          $asset = "${env:ASSET}-$tag.zip"
+          $notes = @"
+          ASFMKV $tag 预发布构建。
+
+          本版本按打包方式发布两种资产（跑了哪个工作流就有哪个）：
+            ASFMKV-Nuitka-$tag.zip       Nuitka 打包
+            ASFMKV-PyInstaller-$tag.zip  PyInstaller 打包
+          两者功能相同，任选其一；重复运行同一版本号会覆盖同名资产。
+
+          压缩包内只有一个 ASFMKV.exe，解压后直接运行；
+          把 ASFMKVpy.ini 放在 exe 同目录即可沿用旧配置。
+          mkvmerge / ffmpeg 为可选依赖，缺失时相关功能自动降级。
+          首次运行如被 SmartScreen 拦截，请选择“仍要运行”。
+          "@
+
+          # 标签不存在时 gh release view 会往 stderr 写“release not found”，
+          # 先临时放宽 EAP，避免被 runner 的 $ErrorActionPreference='Stop' 当成致命错误。
+          $eap = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          $view = gh release view $tag --json isPrerelease 2>$null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $eap
+
+          # 同一标签若已有正式版，拒绝把预发布资产盖到正式版上
+          if ($exists -and (($view | ConvertFrom-Json).isPrerelease -ne $true)) {
+            throw "Release $tag 已存在且不是预发布版（Pre-release），拒绝覆盖"
+          }
+
+          if ($exists) {
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset `
+              --prerelease `
+              --latest=false `
+              --target "$env:SHA" `
+              --title "ASFMKV $tag" `
+              --notes $notes
+            if ($LASTEXITCODE -ne 0) {
+              # 两个工作流同时发布同一版本时，Release 可能已被对方创建
+              gh release upload $tag $asset --clobber
+            }
+          }
+          if ($LASTEXITCODE -ne 0) { throw "发布资产失败：$asset" }
+
+          gh release edit $tag --title "ASFMKV $tag" --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw "更新 Release 说明失败" }

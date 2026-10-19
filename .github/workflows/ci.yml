@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
+      - ".gitignore"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
+      - ".gitignore"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.13.1"
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 安装 uv 与 Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: uv sync --frozen
+
+      - name: 静态检查
+        run: uv run ruff check asfmkv tests
+
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 安装 uv 与 Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装依赖
+        run: uv sync --frozen
+
+      - name: 单元测试（不需要外部工具）
+        run: uv run pytest -q -m "not integration"
+
+  integration:
+    name: 集成测试
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 安装 uv 与 Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: uv sync --frozen
+
+      - name: 安装外部工具
+        shell: pwsh
+        run: |
+          # 集成测试会调用 mkvmerge / ffmpeg，runner 默认不带，缺失时相关用例只会 skip
+          choco install mkvtoolnix ffmpeg -y --no-progress
+          $mkvDir = "C:\Program Files\MKVToolNix"
+          if (Test-Path -LiteralPath $mkvDir) {
+            $env:Path = "$mkvDir;$env:Path"
+            $mkvDir | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
+          mkvmerge -V
+          ffmpeg -version | Select-Object -First 1
+
+      - name: 集成测试
+        run: uv run pytest -q -m integration

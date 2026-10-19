@@ -1,0 +1,28 @@
+name: Release Beta (Nuitka)
+
+run-name: "Nuitka ${{ inputs.version }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 v0.0.1）：用作 Release 标签和 zip 文件名后缀"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-nuitka-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Nuitka 打包并发布预发布版
+    uses: ./.github/workflows/release-beta-build.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ inputs.version }}
+      packager: nuitka

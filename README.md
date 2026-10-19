@@ -1,301 +1,368 @@
-# AddSubFontMKV Python Remake (ASFMKV Py)
-**Copyright(c) 2022-2024 yyfll**
+# AddSubFontMKV_py
 
-**将您的字幕和字体通过mkvmerge快速批量封装到Matroska容器**
+ASFMKV（AddSubFontMKV）Python 版。分析 ASS/SSA 字幕实际用到的字体，把字体**子集化**，
+再与媒体、字幕一起封装成 MKV / MKS，或把字体直接**内嵌进字幕**。
+提供交互式菜单，也提供完整的命令行接口。
 
-**或是查看您的系统是否拥有字幕所需的字体**
+## 一、安装
 
-**亦或是将您的字体按照字幕进行子集化**
+依赖由 [uv](https://docs.astral.sh/uv/) 管理（`pyproject.toml` + 已提交的 `uv.lock`）：
 
-浪费时间打磨5年的ASFMKV批处理的正统后继者（X）
+```powershell
+winget install --id=astral-sh.uv -e     # 安装 uv；已安装可跳过
+uv sync                                 # 创建 .venv，安装运行时依赖 + dev 依赖
+uv run asfmkv --version
+```
 
-本脚本使用 Apache-2.0 许可证
-## 关于Preview
-由于部分功能是新开发的，目前仍存在多多少少的小问题<br>在本脚本最需要版本号蹭蹭蹭蹦的时候我个人非常忙，真是非常抱歉
+- 完全复现依赖：`uv sync --frozen`（CI 即如此）；升级依赖：`uv lock --upgrade`。
+- 不用 uv 时：`pip install -e ".[dev]"`。
+- 源码方式运行：`uv run python -m asfmkv`。
 
-**尽管目前的最新版本仍然是Preview版本，但是它们都相对稳定而可靠**
+**运行环境**：Python ≥ 3.11（与 `requires-python` 一致），CI 使用 3.12。
 
-**您不应该使用过时的Preview16之前的任何版本，它们甚至不能正确分析ASS文件**
+**必需依赖**（版本范围见 `pyproject.toml`）：
 
-## 目录
-**新版本在Release，仓库还没得空整理暂时不放**
-| [最新更新](#CLI命令行版本更新) | [能干什么](#%E8%83%BD%E5%B9%B2%E4%BB%80%E4%B9%88) | [运行环境](#%E5%AE%89%E8%A3%85%E4%BE%9D%E8%B5%96%E7%BB%84%E4%BB%B6%E5%92%8C%E7%A8%8B%E5%BA%8F) | [功能介绍](#%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D) | [自定义变量](#%E8%87%AA%E5%AE%9A%E4%B9%89%E5%8F%98%E9%87%8F) | [字体信息缓存](#字体信息缓存) | [sublangs本地化](#sublangs本地化)
-| --- | --- | --- | --- | --- | --- | --- |
-
-## 版本前瞻（画大饼）
-* PyQt Beta3版本
-* **重写 字体信息词典**
-* **添加命令行输入支持**
-
-## CLI命令行版本更新
-### Preview 19
-* 将子集化字体置入ASS/SSA作为附件
-* 支持抽出ASS/SSA中的字体附件
-* 删除了过时的功能以应对python 3.14
-* 修复一个小问题
-
-## 能干什么？
-* 字体查重（借由**fontTools**实现，谢谢。）
-* ASS/SSA 依赖字体确认
-* 字体子集化（借由**fontTools**实现，谢谢。字体命名上参考了现有的子集化程序。）
-* 字幕字体批量封装到Matroska（借由**mkvmerge**实现，谢谢）
-* 字幕-视频文件名称匹配（**[RenameSubtitles_RE](https://github.com/DYY-Studio/RenameSubtitles_RE)** 1.1方法的改进版本）
-* ASS/SSA 批量转换为 UTF-8-BOM
-## 安装依赖组件和程序
-#### [Python](https://www.python.org/downloads/windows/)
-#### 运行库
-* CLI版本: `pip3 install chardet fontTools colorama --upgrade`
-* GUI版本: `pip3 install chardet fontTools colorama PyQt5 --upgrade`
-
-#### [mkvmerge](https://mkvtoolnix.download/) (可选)
-
-下载并安装/解压 MKVToolNix，将安装目录添加到系统变量path中
-#### [FFmpeg](https://ffmpeg.org/download.html)（Preview18+ 可选）
-
-下载并解压 FFmpeg与FFprobe，将可执行文件所在目录添加到系统变量path中，或直接与ASFMKVpy放置在同一目录
-
-推荐使用 FFmpeg 5.0 以上版本以避免兼容性问题
-## 系统要求
-**Windows 7 SP1 专业版及以上，python 3.7 及以上，cmd 必须支持 choice 命令**
-
-** 不支持 Linux **
-#### 测试环境
-* Windows10 21H2、21H1、20H1(2004) 及 Windows7 SP1 (已打全部补丁)
-* Python 3.9.5 / 3.8.10
-* mkvmerge v48.0.0 / v65.0.0
-* FFmpeg v5.1.2
-
-# 功能介绍
-| K | 功能 | K | 功能 |
-|---------|---------|---------|---------|
-| A | [列出所需字体](#列出所需字体) | W | [检视旧格式字体](#检视旧格式字体) |
-| B | [字体子集化 & MKV封装](#字体子集化及封装)<br>[**sublangs教程(Preview17+)**](#sublangs教程) | U | [字幕批量转换UTF-8-BOM](#字幕文本编码批量转换) |
-| M | [字幕-视频名称匹配](#字幕-视频名称匹配) | C | [检视重复名称字体](#检视重复名称字体) |
-| S | [搜索字体(Debug)](#搜索字体) | R | [字体信息重载](#字体信息重载) |
-
-启动时需要先扫描注册表里的字体和用户给的自定义字体目录（如果有）
-## 列出所需字体
-（名称来源于前辈的软件 **ListAssFont**，这名字很精炼，我找不到词代替它）
-
-（这一部分的输出格式很大程度上参考了前辈的设计，谢谢！）
-
-为了更快的找到字幕中所述字体名对应的字体，ASFMKV采用了以字体名称作为Key的词典
-
-因而这里的格式与前辈的 ListAssFont 不同
-### [A] 列出全部字体
-会输出 字体文件名（无路径） 与 字体名称 的对应关系
-### [B] 检查并列出
-需要用户输入ASS/SSA字幕文件的路径或其所在目录
-
-会输出 字幕文件内规定的字体名称 与 字体文件名 的对应关系
-## 字体子集化及封装
-ASFMKV的传统功能以及字体子集化功能
-
-**请参见[字体黑名单](https://github.com/DYY-Studio/AddSubFontMKV_py/wiki/%E5%AD%97%E4%BD%93%E9%BB%91%E5%90%8D%E5%8D%95-%E4%B9%B1%E7%A0%81---Fonts-Blacklist---Decode-Error)以减少子集化错误的可能性**
-### [A] 子集化字体
-需要用户输入有外挂字幕的视频文件的路径或其所在目录
-
-会创建子文件夹 `subs` 和 `Fonts`（如果用户没有规定）输出子集化完成的字幕和字体
-
-字体会在 `Fonts` 下的以各视频文件匹配到的第一个字幕的文件名作为名称文件夹下
-
-字幕会带有`.subset`标注
-### [B/C/D] 子集化并封装
-需要用户输入有外挂字幕的视频文件的路径或其所在目录
-
-会自动完成封装流程，并删除子集化的字体和修改过的字幕
-
-默认情况下输出到源文件夹，文件名加有 `.muxed`
-
-**也可以把 notfont 设置为 True，只封装字幕，不封装字体，不进行子集化**
-
-#### ASS/SSA内嵌
-使用ASS/SSA的“附件”功能将字体内嵌于ASS文件`[Fonts]`。
-
-| 字幕滤镜 | 兼容 | 播放器内置 | 兼容 |
-| -- | :-: | -- | :-: |
-| libass | ✅ | PotPlayer | ✅ |
-| XySubFilter | ❌ | MPC-HC/BE | ✅ |
-| VSFilterMod | ✅ | mpv  | ✅ |
-| xy-VSFilter | ✅ | - | - |
-| VSFilter | ✅ | nPlayer | ✅ |
-
-
-#### mkvmerge
-
-传统的使用mkvmerge封装，经过大量测试，比较稳定
-
-需要 `mkvmerge.exe` 在`path`系统变量中的路径下或与ASFMKVpy在同一目录
-#### FFmpeg
-
-**Preview 18**新增的使用ffmpeg进行MKV封装，测试较少，仅保证部分情况正常使用
-
-默认用于没有mkvmerge的环境，并且由于ffmpeg的元数据写入方式，同时需要ffprobe支持
-
-需要您的ffmpeg版本较新，支持`-attach`，建议使用5.0以上版本
-
-需要 `ffmpeg.exe`和`ffprobe.exe` 在`path`系统变量中的路径下或与ASFMKVpy在同一目录
-
-### sublangs教程
-在 Preview 17 中，我加入了拖了大半年的sublangs询问输入功能，在用户交互上废了很多心思
-
-但是使用起来还是比较麻烦，所以在这里特别讲一下
-
-* *演示用视频文件: [SFEO-Raws] ACCA13区监察课 ACCA 13-ku Kansatsu-ka 01-12+SP (BD 720P x264 10bit AAC)*
-* *演示用字幕文件: 动漫国字幕组 ACCA13区监察课*
-
-1. 当你在Preview17+使用 **子集化字体并封装** 功能时，输入路径回车后，会询问您是否要为字幕轨道添加语言信息<br>
-![图片](https://github.com/DYY-Studio/AddSubFontMKV_py/assets/48157880/37558f01-038c-40c3-ade7-3f9c6867fc7c)
-2. 选择`Y`后，程序需要从mkvmerge命令行获取ISO-639语言列表，由于语言较多，可能比较耗时
-3. 然后您就进入了`sublangs`输入界面<br>![图片](https://github.com/DYY-Studio/AddSubFontMKV_py/assets/48157880/6429dc2e-9ad1-4aa1-a1e1-dbce4d821c56)<br>
-示例字幕是您输入的目录中，**外挂字幕最多的视频文件**对应的外挂字幕<br>
-在该界面，高亮的示例字幕代表您目前输入的语言代码所**要应用到的字幕**<br>其它视频文件的外挂字幕，也将按照这个名称顺序应用，**请避免在使用该功能时混用名称排序不同的字幕**
-4. 您可以输入 ISO-639-1/2/3 语言代码，也可以输入该语言对应的英文名称（mkvmerge的语言列表没有其它语言支持）
-<br>如要输入中文，直接输入ISO-639-3 `chi`，或ISO-639-2 `zh`
-<br>也可以可以搜索`Chinese`
-<br>![图片](https://github.com/DYY-Studio/AddSubFontMKV_py/assets/48157880/bc99406b-94bc-4104-a353-cb18e5a9a964)
-<br>然后选择`4`
-<br>![图片](https://github.com/DYY-Studio/AddSubFontMKV_py/assets/48157880/59767022-e1a0-4606-a8ab-76c0eefba8c0)
-5. 当您确认了输入的语言后，在刚刚的字幕示例的末尾，会显示您选择的语言的英文名称，程序则会向您请求下一个字幕的语言
-<br>![图片](https://github.com/DYY-Studio/AddSubFontMKV_py/assets/48157880/99be82a4-7384-458b-9b91-59e8fe0cd37c)
-6. 在全部字幕示例的语言代码输入完毕后，程序会向您展示全部字幕的语言代码应用情况
-<br>如果您认为之前的输入有误，您可以在这里输入`R`，如果您突然不想用语言代码了，可以输入`C`，否则输入`Y`继续封装
-
-附上一些常用的ISO-639-3编码对应
-| 语言 | ISO-639-3 | 语言 | ISO-639-3
-| --- | --- | --- | --- |
-| 中文 | chi | 未知 | und |
-| 日文 | jpn | 韩文 | kor |
-| 英文 | eng | 法语 | fre |
-
-您可以使用 `mkvmerge --list-languages` 来查看全部语言
-
-## 字幕-视频名称匹配
-本功能是 **[RenameSubtitles_RE](https://github.com/DYY-Studio/RenameSubtitles_RE)** 项目1.1方法的python实现
-
-通过简单运算得到视频文件名和字幕文件名中剧集数所在位置，然后直接套用，具体算法参见隔壁项目页
-
-功能特色
-* 非常快
-* 有一定的准确度
-* 支持多字幕
-* 支持自动字幕后缀信息，或者手动输入多字幕后缀信息
-
-本功能需要您的字幕文件和视频文件使用相同的集数表达，`5.1`和`5.5`，`OVA01`和`OVA1`是无法匹配的
-
-## 搜索字体
-DEBUG用的功能，可以在程序读取的所有字体信息中搜索字体
-### 完全匹配
-就是完全匹配，只有输入的名称与字体信息中的名称完全相符才会显示
-### 部分匹配
-只支持` `（半角空格）作为"与（AND）"操作符
-
-在字体名称中有对应关键词就会输出
-
-## 检视重复名称字体
-列出同一字体名称下的字体文件
-
-注意：必须满足以下条件才会显示在这里
-1. 文件名不相同（包括扩展名）
-2. 必须是从注册表读取的系统已安装字体
-
-## 检视旧格式字体
-在fontTools对字体的读取与子集化进行下一步的修正前，这里会列出与fontTools不兼容的旧格式字体
-
-这些字体很有可能不能正常的被子集化，您可能需要对这些字体使用字体编辑软件重新保存来兼容fontTools
-
-## 字幕文本编码批量转换
-就是单纯的把你的 `.ass` `.ssa` `.srt`文件转为UTF-8-BOM以便其它应用使用，基于chardet编码探测
-
-## 字体信息重载
-### 1 更新缓存
-以标准启动方式重新加载字体信息
-### 2 仅覆盖当前使用的缓存文件并重载
-完全重建当前使用的字体信息缓存
-### 3 删除所有缓存文件并重载
-把现在没使用的字体信息缓存也删了
-### 4 新增自定义字体目录并重载
-允许用户添加多个自定义字体目录
-
-# 高级
-### 崩溃反馈
-1. 打开 命令提示行/cmd ，输入`py "脚本绝对路径"`，重复您崩溃前所做的操作<br>或 使用有断点调试功能的编辑器（如VS Code），对该脚本进行调试，重复您崩溃前所做的操作
-
-2. 发送崩溃信息 及 致使崩溃的操作 到作者邮箱，或在GitHub提出issue
-### 自定义变量
-自定义变量是沿袭自ASFMKV批处理版本的高级自定义操作
-
-在Python Remake中，大部分自定义变量都可以在运行过程中快捷更改
-
-如果您想要更改这些变量的默认值，或是更改部分无法在运行中更改的变量，请往下看
-#### 变更自定义变量
-1. 使用编辑器打开本脚本<br>（注意，您的编辑器必须支持 UTF-8 NoBOM，不建议Win7用户使用记事本打开）
-2. 在`import`部分的下方就是本脚本的自定义变量<br>编辑时请注意语法，不要移除单引号，绝对路径需要添加r在左侧引号前，右侧引号前不应有反斜杠
-3. 保存
-#### 运行时不能变更的自定义变量
-| 变量名 | 作用 |
-| --- | --- |
-| extlist | 指定视频文件的扩展名 |
-| fontin | 外部字体文件夹的路径 |
-| sublang | 给字幕轨道赋予语言编码 |
-| o_fontload | 禁用注册表字体库和自定义字体库 |
-| s_fontload | 加载工作目录的子目录中的字体 |
-| f_priority | 控制各字体源的优先顺序 |
-| no_extcheck | 关闭mkvmerge兼容扩展名检查 |
-# 字体信息缓存
-该部分将介绍 Preview 17 版本中字体信息缓存的实现方式
-
-使用JSON配置实在是太简单了，所以缓存以JSON形式保存，在程序中则保存为一个词典
-
-缓存的JSON保存在`%APPDATA%/ASFMKVpy`下
-### 目录索引
-Preview 17 字体信息缓存采用目录形式缓存，将同一目录（不包括子目录）下的字体信息包含在一个JSON文件中
-
-JSON文件名称即为索引，是 **目录绝对路径(转小写)再使用UTF-8编码** 的 **CRC32** 校验值
-
-因此缓存采用随用随读的形式，程序校验文件所在目录路径再寻找对应的缓存文件。
-
-### 字体索引
-为了防止字体变更导致信息失效，字体索引是由三个成分构成一段**CRC32校验值**
-
-**字体文件绝对路径(转小写) + 字体文件大小(Byte) + 文件变更时间(Float) 再使用 UTF-8 编码**
-
-# sublangs本地化
-从 **Preview 18** 版本开始，sublangs选择器支持ISO-639语言的本地化名称读取
-
-您需要将本地化文件放入 `%APPDATA%\ASFMKVpy\isoLang\对应语言的ISO639-1语言代码`
-
-如简体中文应将本地化文件放入 `%APPDATA%\ASFMKVpy\isoLang\zh_CN`
-
-程序在启动时，会通过即将过时的`locale.getdefaultlocale()`获取当前系统所用语言的ISO639-1语言代码
-
-在执行sublangs选择器时，程序会扫描上述文件夹寻找本地语言对应的本地化文件，如果没有子集(如zh_CN)，则寻找同一语言下的其它子集(zh、zh_Hans...)
-
-每次在Release时我都会提供一个全语言本地化压缩包，请根据自己所在地语言选择放入
-
-**提供的本地化语言包是 [language-list](https://github.com/umpirsky/language-list) 项目和 [pycountry](https://github.com/flyingcircusio/pycountry) 项目的混合**<br>
-**前者提供了ISO-639-1对应的翻译文本，而后者提供了ISO-639-2T/2B/3中对应的语言代码**<br>
-**由衷地感谢这两个项目**
-
-## 自定义本地化文件
-
-本地化JSON应遵循以下语法:
-`{"[ISO-639-1/2B/2T/3]": "[对应的本地化名称]"}`
-
-# 未测试功能
-#### mkvout, fontout, assout
-设置为绝对路径的情况暂未测试
-# 缺点
-### 程序结构复杂
-写到后面逻辑乱了，很多可以函数化的东西被反复用了
-### 错误易崩溃
-对错误的预防只有最低限度，一旦错了就炸了，没有Module_DEBUG的第一天……
-### 注释不够多
-自己读起来都痛苦
-# 致谢
-### [fontTools](https://github.com/fonttools/fonttools) (MIT Licence)
-### [MKVToolNix/mkvmerge](https://mkvtoolnix.download/) (GPLv2 Licence)
-### [chardet](https://github.com/chardet/chardet) (LGPLv2.1 Licence)
-### [colorama](https://github.com/tartley/colorama) (BSD-3-Clause License)
-### [language-list](https://github.com/umpirsky/language-list) (MIT License)
-### [pycountry](https://github.com/flyingcircusio/pycountry) (LGPLv2.1 License)
+| 依赖 | 用途 |
+|---|---|
+| `fonttools>=4.67,<5` | 字体解析与子集化 |
+| `chardet>=7.6,<8` | 字幕编码检测 |
+| `colorama>=0.4.6,<0.5` | Windows 控制台颜色 |
+
+**可选外部工具**（缺失时相关功能自动降级，不影响其他功能）：
+
+| 工具 | 用途 | 缺失时 |
+|---|---|---|
+| `mkvmerge` | 默认封装方式、语言代码 | 改用 FFmpeg 封装 |
+| `ffmpeg` / `ffprobe` | FFmpeg 封装 | 只能使用 mkvmerge |
+| `choice` | Windows 交互菜单按键 | 退化为文本输入 |
+
+字体缓存在 `%APPDATA%\ASFMKVpy`，可随时删除，程序会自动重建；缓存目录不可写时自动跳过，不影响功能。
+
+---
+
+## 二、命令行接口
+
+入口为 `asfmkv`，等价写法 `python -m asfmkv`。以下示例省略 `uv run` 前缀，
+用 uv 时补上（如 `uv run asfmkv list-fonts ...`）。
+
+不带子命令时进入交互式主菜单：
+
+```powershell
+uv run python -m asfmkv
+```
+
+### 2.1 通用参数
+
+```text
+ASFMKV [-h] [-v] [--ini INI] [--extlist EXTLIST] {list-fonts,subset,mux,transcode,match} ...
+```
+
+| 参数 | 说明 |
+|---|---|
+| `-h`, `--help` | 帮助；`asfmkv <子命令> --help` 查看子命令帮助 |
+| `-v`, `--version` | 显示版本号 |
+| `--ini <文件>` | 指定 `ASFMKVpy.ini`；默认读取程序目录（源码运行 = 项目根，打包后 = exe 同目录），不存在则只用内置默认值 |
+| `--extlist <列表>` | 覆盖媒体扩展名，分号分隔，如 `"mkv;mp4;avi"` |
+
+### 2.2 子命令一览
+
+| 子命令 | 作用 | 对文件的影响 |
+|---|---|---|
+| `list-fonts` | 列出字幕所需字体 | 不改动源文件（可能生成报告 / 副本目录） |
+| `subset` | 子集化字体，可选封装 / 内嵌 | 只生成新文件，不改动源文件 |
+| `mux` | 直接封装媒体、字幕、字体 | 只生成新文件 |
+| `transcode` | 字幕批量转 UTF-8-BOM | 生成新文件 |
+| `match` | 媒体与字幕名称匹配 | 预览后确认才重命名 |
+
+### 2.3 list-fonts
+
+```powershell
+asfmkv list-fonts <字幕文件或目录>
+```
+
+按 `[字符数] 字体名 <字体文件>` 列出所需字体，未找到的显示为 `[N] 字体名 - No Found`，
+末尾给出字体概览。受这些配置开关影响：`resultw`（写出 `Fonts/fonts.txt`）、
+`copyfont`（复制字体到 `Fonts/`）、`s_subdir`（搜索子目录）、`char_lost`（统计缺字，较慢）、
+`exact_lost`（按字幕列出缺字字体）、`embedded_font_extract`（抽出内嵌字体）。
+
+```powershell
+asfmkv list-fonts "D:\Anime\ep01.sc.ass"
+asfmkv list-fonts "D:\Anime\Season1"
+```
+
+### 2.4 subset
+
+```powershell
+asfmkv subset <媒体文件、字幕文件或目录> [选项]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--subtitle <文件>` | 指定字幕，可重复；指定后不再按文件名自动匹配 |
+| `--out-ass` / `--out-font` / `--out-media` | 字幕 / 字体 / 媒体（或 MKS）输出目录 |
+| `--mux` | 子集化后封装为 MKV（仅输入为媒体文件时生效） |
+| `--mks` | 子集化后封装为外置 MKS（可批量；目录内有视频则按视频合并字幕） |
+| `--embed` | 把子集字体内嵌进 ASS/SSA，不生成媒体文件 |
+| `--pattern "<含 * 的规则>"` | 视频文件名规则（同交互菜单），按剧集把字幕归组，用于 `--mks` / `--embed` 批量 |
+| `--ffmpeg` | 用 FFmpeg 而非 mkvmerge 封装（配合 `--mux`） |
+
+四种模式：
+
+1. 不带 `--mux` / `--mks` / `--embed`：只子集化。默认在字幕同目录生成 `*.subset.ass`，字体输出到 `Fonts/<字幕名>/`。
+2. `--mux`：子集化 + 封装为 MKV（默认 mkvmerge，加 `--ffmpeg` 用 FFmpeg）。
+3. `--mks`：子集化 + 封装为外置 MKS（含子集化字幕轨与子集字体附件，不含视频）；逐组处理：
+   目录内有视频则同一视频的多条字幕合并为一个 mks，只有字幕则每条字幕各生成一个 mks
+   （加 `--pattern` 可把同一集的 chs/cht 合并成一个 mks）。
+4. `--embed`：把子集字体写入 ASS/SSA 的 `[Fonts]` 段，输出内嵌字体字幕；逐组内嵌，
+   每份字幕只嵌入它自己用到的子集字体（不会把全剧集字体塞进每一份）。
+
+```powershell
+# 只子集化
+asfmkv subset "D:\Anime\ep01.mkv" --out-ass "D:\Out\subs" --out-font "D:\Out\fonts"
+# 子集化并封装
+asfmkv subset "D:\Anime\ep01.mkv" --mux --out-media "D:\Out\mkv"
+asfmkv subset "D:\Anime\ep01.mkv" --mux --ffmpeg --out-media "D:\Out\mkv"
+# 字体内嵌进字幕（可批量）
+asfmkv subset "D:\Anime\ep01.sc.ass" --embed --out-ass "D:\Out\embed"
+asfmkv subset "D:\Anime\Season1" --embed --out-ass "D:\Out\embed"
+# 生成外置 MKS（可批量，需要 mkvmerge）
+asfmkv subset "D:\Anime\Season1" --mks --out-media "D:\Out\mks"
+# 只有字幕没有视频时，用文件规则把同一集的字幕合并成一个 mks / 一起内嵌
+asfmkv subset "D:\Out\subs" --mks --out-media "D:\Out\mks" --pattern "[VCB-Studio] Tsuki ga Kirei [*][Ma10p_1080p][x265_flac_dts]"
+asfmkv subset "D:\Out\subs" --embed --out-ass "D:\Out\embed" --pattern "[VCB-Studio] Tsuki ga Kirei [*][Ma10p_1080p][x265_flac_dts]"
+# 只处理指定字幕
+asfmkv subset "D:\Anime\ep01.mkv" --subtitle "D:\Anime\ep01.sc.ass" --out-font "D:\Out\fonts"
+```
+
+> `--mks` 输出的 mks 文件名默认与字幕/视频同名、`.mks` 结尾；需安装 mkvmerge。
+> `--pattern` 的写法和交互菜单的“视频文件名规则”一致：把每集不同的部分换成 `*`，
+> 程序用匹配到的文本作为剧集名（也作为输出文件名）；匹配不到的字幕各自单独一组。
+> 子集化细节由配置控制：`char_compatible`（广兼容子集）、`ignore_lost`（忽略缺字）、
+> `error_stop`（失败即中断）、`fontload`（使用工作目录字体）等。
+> 开启 `fontload`（默认）时会先自动载入字幕同目录及其名字含 `font` 的子目录里的字体，
+> 所以把字体放在字幕目录的 `Fonts/` 下即可直接子集化。
+> 缺少字体时会提示输入字体文件或所在目录；输入 `SKIPFONT`（全大写）跳过剩余缺失字体。
+
+### 2.5 mux
+
+```powershell
+asfmkv mux <媒体文件> [选项]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--subtitle <文件>` | 追加字幕轨，可重复 |
+| `--font <文件>` | 追加字体附件，可重复 |
+| `-o`, `--output <文件>` | 输出路径（严格使用，不改名） |
+| `--mks` | 输出外置字幕 `.mks` 而非 `.mkv` |
+
+`mux` 不做子集化，只打包现成的媒体 / 字幕 / 字体，源文件不删除。
+不指定 `-o` 时输出 `<媒体名>.muxed.mkv`，已存在则依次为 `<媒体名>.muxed#1.mkv`、`#2`……
+`--mks` 用于只打包字幕与字体：**媒体不会被打包**，只用于推导输出文件名与轨道标题，
+配合 `--font` 可把字体作为附件写入 mks。
+
+```powershell
+asfmkv mux "D:\Anime\ep01.mkv" --subtitle "D:\Out\subs\ep01.subset.ass" `
+       --font "D:\Out\fonts\ep01\Arial.ABCD1234.ttf" -o "D:\Out\ep01.mkv"
+asfmkv mux "D:\Anime\ep01.mkv" --subtitle "D:\Out\subs\ep01.subset.ass" -o "D:\Out\ep01.mks" --mks
+asfmkv mux "D:\Anime\ep01.mkv" --subtitle "D:\Out\subs\ep01.subset.ass" `
+       --font "D:\Out\fonts\ep01\Arial.ABCD1234.ttf" -o "D:\Out\ep01.mks" --mks
+```
+
+### 2.6 transcode
+
+```powershell
+asfmkv transcode <字幕文件或目录>
+```
+
+把 ASS/SSA/SRT 转为 **UTF-8-BOM**。目录输入的输出为 `UTF8-Subtitles/xxx.utf8.ass`；
+单文件输入则在同目录生成 `xxx.utf8.ass`。已是 UTF-8-BOM 的文件提示 `[Already UTF-8-BOM]` 并跳过。
+
+```powershell
+asfmkv transcode "D:\Anime\Season1"
+asfmkv transcode "D:\Anime\ep01.sc.ass"
+```
+
+### 2.7 match
+
+```powershell
+asfmkv match <字幕目录> <视频目录>
+```
+
+自动推断剧集编号位置，给出重命名预览，确认后执行；在字幕目录写入 `subsRename_*.log` 供撤销。
+
+```powershell
+asfmkv match "D:\Anime\subs" "D:\Anime\videos"
+```
+
+---
+
+## 三、下载预发布版 / 自行打包
+
+### 3.1 从 GitHub Actions 发布预发布版
+
+仓库提供两个**手动触发**的工作流，每次输入版本号（如 `v0.0.1`）打包一次，
+把 `ASFMKV.exe` 压缩成 zip 发布到**对应版本号的预发布 Release**（标签即版本号）：
+
+| 工作流 | 打包方式 | 资产名（示例） |
+|---|---|---|
+| `.github/workflows/release-beta.yml` | Nuitka onefile | `ASFMKV-Nuitka-v0.0.1.zip` |
+| `.github/workflows/release-beta-pyinstaller.yml` | PyInstaller onefile | `ASFMKV-PyInstaller-v0.0.1.zip` |
+
+1. 打开仓库 **Actions** 页面，左侧选择任一工作流；
+2. 点击 **Run workflow**，填写版本号（必填，如 `v0.0.1`）后运行；
+3. 结束后到 **Releases** 打开对应标签（标记为 Pre-release），下载 zip 解压即可。
+
+两个工作流发布到同一个版本号 Release，所以两个 zip 会出现在同一页面；
+zip 内只有一个 `ASFMKV.exe`。重复运行同一版本号会覆盖同名资产。
+
+两个入口工作流只是壳，实际打包 / 发布步骤都在可复用的
+`.github/workflows/release-beta-build.yml`（`workflow_call`）里，改流程只需动这一个文件：
+
+- 先 `uv sync --frozen --group build-<打包方式>`，只装当前打包方式需要的那套工具；
+- 跑全量测试；
+- 用输入的版本号生成 `asfmkv/_version.py`（该文件不入库），因此 `ASFMKV.exe --version`
+  会与 Release 标签一致，同时写入 exe 的 Windows 文件版本属性；
+- 打包后冒烟测试会校验 `--version` 输出确实包含该版本号；
+- 发布时把资产传到同名预发布 Release；若该标签已经是正式 Release，则拒绝覆盖。
+
+另外 `.github/workflows/ci.yml` 在 push / PR 时跑 ruff + 单元测试（Python 3.11 / 3.12），
+以及单独一个默认装了 mkvmerge / ffmpeg 的集成测试 job。
+
+
+### 3.2 本地用 Nuitka 打包
+
+打包入口 `build_entry.py` 已随仓库提供（等价于 `python -m asfmkv`）。
+
+```powershell
+uv sync --group build-nuitka     # 安装 nuitka / zstandard
+
+# 缓存放到项目内：%LOCALAPPDATA% 不可写的受限环境必需
+$env:NUITKA_CACHE_DIR = "$PWD\.cache\nuitka"
+# 受限环境还要把 TEMP 指到项目内，否则 MSVC 链接器会报
+# LNK1104: 无法打开文件 "...\Temp\lnk{...}.tmp"
+$env:TEMP = "$PWD\.cache\tmp"; $env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+
+uv run python -m nuitka --standalone --onefile --assume-yes-for-downloads `
+    --include-package=asfmkv --include-package-data=fontTools `
+    --windows-console-mode=force `
+    --output-dir=dist --output-filename=ASFMKV.exe build_entry.py
+```
+
+> 受限环境（临时目录不可写）有两处会出问题：构建时 MSVC 链接器报
+> `LNK1104: ...\Temp\lnk{...}.tmp`，运行时报
+> `failed to open ...\onefile_...\build_entry.dll for writing`。
+> 构建时按上面把 `TEMP`/`TMP` 指到项目内；运行单文件版时同样先把 `TEMP` 指向可写目录，
+> 或去掉 `--onefile` 生成免解包的目录版（`dist/build_entry.dist/`，最稳）。
+>
+> 本地打包沿用源码里的 `APP_VERSION`（当前为 `Pre25-refactor`）；发布工作流会生成
+> `asfmkv/_version.py` 覆盖它。想在本地复现发布版本号，手动写这个文件即可：
+> `'APP_VERSION = "0.0.1"' | Set-Content asfmkv/_version.py -Encoding utf8`（该文件已被 git 忽略）。
+
+### 3.3 本地用 PyInstaller 打包
+
+```powershell
+uv sync --group build-pyinstaller  # 安装 pyinstaller
+
+$env:PYINSTALLER_CONFIG_DIR = "$PWD\.cache\pyinstaller"
+# 受限环境同样把 TEMP 指到项目内（见 3.2）
+$env:TEMP = "$PWD\.cache\tmp"; $env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+
+uv run python -m PyInstaller --noconfirm --clean --onefile --console --name ASFMKV `
+    --distpath dist --workpath build `
+    --collect-all fontTools --collect-all chardet build_entry.py
+```
+
+> 报 `failed to create cache directory` 或无法写 `%LOCALAPPDATA%` 时，检查上面的缓存目录变量。
+> 两种方式的产物都是 `dist/ASFMKV.exe`（先后运行会互相覆盖，任选其一）。
+> 单文件版运行时要解包到 `%TEMP%`；若报 `Could not create temporary directory!`
+> 或解压失败（受限终端 / 沙箱），说明临时目录不可写：先把 TEMP 指到可写目录（见 3.2），
+> 在普通桌面环境运行，或加 `--onedir` 生成免解包的目录版。
+> `ASFMKVpy.ini` 需放在 exe 同目录；`mkvmerge` / `ffmpeg` 为可选依赖，
+> 缺失时相关功能自动降级；首次运行可能被 SmartScreen 拦截。
+
+---
+
+## 四、配置文件 ASFMKVpy.ini
+
+优先级：内置默认值 < `ASFMKVpy.ini` < 命令行参数。键名大小写不敏感，兼容旧字段名
+（如 `usingFF`、`matchStrict`、`noRequestFont`）。
+
+```ini
+[settings]
+; 布尔值：1 为真，其余为假
+usingFF=0
+notfont=0
+matchStrict=1
+char_compatible=1
+extlist=mkv,mp4,mts,mpg,avi
+; 自定义字体目录，以 ? 分隔
+fontin=D:\Fonts?E:\MoreFonts
+```
+
+常用开关：
+
+| 键 | 含义 |
+|---|---|
+| `usingFF` | 启动时检测并启用 FFmpeg |
+| `notfont` | 封装时不附加字体 |
+| `noRequestFont` | 缺少字体时不询问，直接跳过 |
+| `char_compatible` | 广兼容性子集化（补齐数字/字母） |
+| `ignoreLost` | 忽略字体缺少的字符 |
+| `errorStop` | 子集化失败即中断 |
+| `fontload` / `s_fontload` | 使用工作目录 / 子目录中的字体 |
+| `rmAssIn` / `rmAttach` | 封装时移除内挂字幕 / 原有附件 |
+| `v_subdir` / `s_subdir` | 搜索子目录（视频 / 字幕） |
+| `copyfont` / `resultw` | 复制所需字体到 `Fonts/` / 写出结果文件 |
+| `subl_local` | 界面语言区域代码，如 `zh_CN` |
+
+---
+
+## 五、项目结构
+
+```text
+pyproject.toml  依赖与工具配置（uv / pytest / ruff）
+uv.lock         依赖锁定文件（随代码提交）
+build_entry.py  打包入口（Nuitka / PyInstaller 共用）
+asfmkv/
+  cli.py        命令行入口
+  config/       配置模型、旧 INI 兼容层
+  core/         异常、日志与颜色
+  platform/     控制台交互、注册表、缓存路径
+  utils/        文件、CRC、子进程、编码检测
+  fonts/        字体扫描 / 解析 / 缓存 / 子集化
+  ass/          ASS/SSA 解析、写回、字体使用分析
+  mux/          mkvmerge / FFmpeg / 内嵌封装
+  match/        媒体扫描、字幕匹配、重命名
+  services/     高层用例
+  ui/           交互菜单
+tests/
+  unit/         单元测试
+  integration/  集成测试（需系统字体或外部工具）
+.github/workflows/
+  ci.yml                        push / PR：ruff + 单元 / 集成测试
+  release-beta.yml              Nuitka 发布入口
+  release-beta-pyinstaller.yml  PyInstaller 发布入口
+  release-beta-build.yml        两个入口共用的打包 / 发布实现
+```
+
+## 六、测试
+
+```powershell
+uv run pytest -q                        # 全部测试
+uv run pytest -q -m "not integration"   # 跳过集成测试
+uv run ruff check asfmkv tests          # 静态检查
+```
+
+> 不用 uv：`pip install -e ".[dev]"` 后直接 `python -m pytest -q` / `ruff check asfmkv tests`。
+>
+> CI（`.github/workflows/ci.yml`）会跑：ruff 静态检查、单元测试（Python 3.11 / 3.12）、
+> 集成测试（单独 job，先装 mkvmerge / ffmpeg）。
+
+---
+
+## 七、许可证
+
+[Apache License 2.0](LICENSE)，完整条款见 `LICENSE`。
